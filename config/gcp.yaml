@@ -1,0 +1,40 @@
+app:
+  env: gcp
+  host: "0.0.0.0"
+  port: 8000
+  log_level: INFO
+
+kafka:
+  # Use Confluent Cloud or GCP Pub/Sub bridge
+  bootstrap_servers: "${GCP_KAFKA_BOOTSTRAP_SERVERS}"
+  image_topic: "ocr.images"
+  consumer_group: "ocr-consumer-group"
+
+mongodb:
+  # Use MongoDB Atlas on GCP
+  uri: "${MONGODB_URI}"
+  database: "ocr_service"
+
+redis:
+  # Use GCP Memorystore (Redis)
+  host: "${REDIS_HOST}"
+  port: 6379
+  db: 0
+
+storage:
+  backend: gcs
+  gcs_bucket: "${GCS_BUCKET}"
+
+ml_service:
+  # Use Vertex AI endpoint
+  url: "${ML_SERVICE_URL}"
+  timeout: 30
+
+otel:
+  exporter_endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  service_name: "ocr-service"
+  enabled: true
+
+image:
+  resize_width: 800
+  resize_height: 800

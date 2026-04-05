@@ -1,0 +1,79 @@
+# Kubernetes Deployment for the standalone Kafka consumer.
+#
+# Running the consumer as a separate Deployment (instead of inside the
+# ocr-service pod) allows it to scale independently based on Kafka consumer
+# lag via KEDA.  See keda-scaledobject.yaml for the autoscaling policy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocr-consumer
+  labels:
+    app: ocr-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ocr-consumer
+  template:
+    metadata:
+      labels:
+        app: ocr-consumer
+    spec:
+      containers:
+        - name: ocr-consumer
+          image: ocr-service:latest   # replace with your registry image
+          command: ["python", "-m", "app.kafka.consumer_entrypoint"]
+          env:
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: ocr-config
+                  key: APP_ENV
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                configMapKeyRef:
+                  name: ocr-config
+                  key: KAFKA_BOOTSTRAP_SERVERS
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: ocr-secrets
+                  key: MONGODB_URI
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: ocr-config
+                  key: REDIS_HOST
+            - name: ML_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ocr-config
+                  key: ML_SERVICE_URL
+            - name: STORAGE_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: ocr-config
+                  key: STORAGE_BACKEND
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            exec:
+              # Verify the consumer process is alive by checking Python can
+              # import the consumer module (process crash = pod restart).
+              # Replace with a proper health-check HTTP endpoint if the
+              # consumer exposes one in future.
+              command:
+                - python
+                - -c
+                - |
+                  import threading, sys
+                  threads = [t.name for t in threading.enumerate()]
+                  sys.exit(0 if 'kafka-consumer' in threads else 1)
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3

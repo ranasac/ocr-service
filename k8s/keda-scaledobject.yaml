@@ -1,0 +1,45 @@
+# KEDA ScaledObject for the Kafka consumer Deployment.
+#
+# KEDA (Kubernetes Event-Driven Autoscaler) watches the consumer lag on the
+# ocr.images topic and adjusts the number of consumer replicas accordingly:
+#
+#   lag == 0                 → scale to minReplicaCount (1 warm standby)
+#   lag >= lagThreshold      → add replicas (up to maxReplicaCount)
+#   lag sustained at max     → hold at maxReplicaCount
+#
+# Constraints:
+#   - maxReplicaCount should never exceed the number of Kafka partitions on
+#     the topic.  Extra replicas beyond the partition count sit idle.
+#   - Set KAFKA_TOPIC_PARTITIONS to match your topic's partition count and
+#     adjust maxReplicaCount accordingly (default: 8 partitions).
+#
+# Prerequisites:
+#   kubectl apply -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ocr-consumer-scaledobject
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: ocr-consumer          # must match Deployment metadata.name
+
+  # Keep at least 1 replica warm so there is no cold-start delay on burst traffic.
+  minReplicaCount: 1
+  # Cap at 8 – equal to the number of partitions on ocr.images.
+  maxReplicaCount: 8
+
+  # Wait 60 s before scaling down to avoid thrashing on bursty workloads.
+  cooldownPeriod: 60
+
+  triggers:
+    - type: kafka
+      metadata:
+        # Kafka broker address reachable from within the cluster.
+        bootstrapServers: kafka:29092
+        consumerGroup: ocr-consumer-group
+        topic: ocr.images
+        # Scale out by 1 replica for every 10 unprocessed messages.
+        lagThreshold: "10"
+        # Measure lag as the number of messages behind the latest offset.
+        offsetResetPolicy: latest

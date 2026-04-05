@@ -1,0 +1,42 @@
+app:
+  env: azure
+  host: "0.0.0.0"
+  port: 8000
+  log_level: INFO
+
+kafka:
+  # Use Azure Event Hubs (Kafka-compatible)
+  bootstrap_servers: "${AZURE_EVENT_HUB_NAMESPACE}.servicebus.windows.net:9093"
+  image_topic: "ocr.images"
+  consumer_group: "ocr-consumer-group"
+
+mongodb:
+  # Use Azure Cosmos DB for MongoDB API
+  uri: "${MONGODB_URI}"
+  database: "ocr_service"
+
+redis:
+  # Use Azure Cache for Redis
+  host: "${REDIS_HOST}"
+  port: 6380
+  db: 0
+  ssl: true
+
+storage:
+  backend: adls
+  adls_account: "${AZURE_STORAGE_ACCOUNT}"
+  adls_container: "${AZURE_STORAGE_CONTAINER}"
+
+ml_service:
+  # Use Azure ML managed endpoint
+  url: "${ML_SERVICE_URL}"
+  timeout: 30
+
+otel:
+  exporter_endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  service_name: "ocr-service"
+  enabled: true
+
+image:
+  resize_width: 800
+  resize_height: 800
