@@ -1,0 +1,41 @@
+app:
+  env: aws
+  host: "0.0.0.0"
+  port: 8000
+  log_level: INFO
+
+kafka:
+  # Use AWS MSK endpoint
+  bootstrap_servers: "${AWS_MSK_BOOTSTRAP_SERVERS}"
+  image_topic: "ocr.images"
+  consumer_group: "ocr-consumer-group"
+
+mongodb:
+  # Use AWS DocumentDB or MongoDB Atlas
+  uri: "${MONGODB_URI}"
+  database: "ocr_service"
+
+redis:
+  # Use AWS ElastiCache
+  host: "${REDIS_HOST}"
+  port: 6379
+  db: 0
+
+storage:
+  backend: s3
+  s3_bucket: "${AWS_S3_BUCKET}"
+  s3_region: "${AWS_REGION}"
+
+ml_service:
+  # Use AWS SageMaker endpoint
+  url: "${ML_SERVICE_URL}"
+  timeout: 30
+
+otel:
+  exporter_endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  service_name: "ocr-service"
+  enabled: true
+
+image:
+  resize_width: 800
+  resize_height: 800

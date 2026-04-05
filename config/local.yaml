@@ -1,0 +1,36 @@
+app:
+  env: local
+  host: "0.0.0.0"
+  port: 8000
+  log_level: INFO
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  image_topic: "ocr.images"
+  consumer_group: "ocr-consumer-group"
+
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "ocr_service"
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+
+storage:
+  backend: local
+  local_path: "./images"
+
+ml_service:
+  url: "http://localhost:8001"
+  timeout: 30
+
+otel:
+  exporter_endpoint: "http://localhost:4317"
+  service_name: "ocr-service"
+  enabled: true
+
+image:
+  resize_width: 800
+  resize_height: 800
