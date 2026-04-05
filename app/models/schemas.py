@@ -27,6 +27,7 @@ class ImageMetadata(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = None
+    ocr_result: Optional["OCRResult"] = None
 
     model_config = {"use_enum_values": True}
 
@@ -73,9 +74,34 @@ class OCRResult(BaseModel):
 
 
 class UploadResponse(BaseModel):
-    """Response returned to client after image upload."""
+    """Response returned to client after image upload (202 Accepted)."""
 
     image_id: str
     status: str
-    ocr_result: Optional[OCRResult] = None
-    message: str = "Image processed successfully"
+    status_url: str
+    message: str = "Image accepted for processing. Poll status_url for the result."
+
+
+class PresignedUploadRequest(BaseModel):
+    """Request body for the pre-signed URL endpoint."""
+
+    filename: str
+    content_type: str
+
+
+class PresignedUploadResponse(BaseModel):
+    """Pre-signed URL response – client uploads directly to cloud storage."""
+
+    image_id: str
+    upload_url: str
+    expires_in: int = 300
+    status_url: str
+    submit_url: str
+    message: str = (
+        "Upload your file to upload_url using HTTP PUT, "
+        "then POST to submit_url to trigger OCR processing."
+    )
+
+
+# Resolve forward reference
+ImageMetadata.model_rebuild()

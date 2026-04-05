@@ -2,12 +2,12 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import motor.motor_asyncio
 from pymongo import DESCENDING
 
-from app.models.schemas import ImageMetadata, ImageStatus
+from app.models.schemas import ImageMetadata, ImageStatus, OCRResult
 
 logger = logging.getLogger(__name__)
 
@@ -73,3 +73,18 @@ async def update_status(
     if error_message is not None:
         update["$set"]["error_message"] = error_message
     await db["image_metadata"].update_one({"image_id": image_id}, update)
+
+
+async def store_ocr_result(image_id: str, result: OCRResult) -> None:
+    """Persist the OCR result alongside the image metadata document."""
+    db = get_db()
+    await db["image_metadata"].update_one(
+        {"image_id": image_id},
+        {
+            "$set": {
+                "ocr_result": result.model_dump(),
+                "status": ImageStatus.COMPLETED.value,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+    )

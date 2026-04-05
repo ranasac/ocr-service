@@ -52,16 +52,16 @@ def _delivery_callback(err, msg) -> None:  # noqa: ANN001
         kafka_messages_produced_total.labels(topic=topic, status="success").inc()
 
 
+def _serialize(obj):
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
 def publish_image_event(message: KafkaImageMessage, topic: str) -> None:
     """Publish an image ingestion event to Kafka."""
     producer = get_producer()
-
-    def _serialise(obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serialisable")
-
-    payload = json.dumps(message.model_dump(), default=_serialise).encode("utf-8")
+    payload = json.dumps(message.model_dump(), default=_serialize).encode("utf-8")
     producer.produce(
         topic=topic,
         key=message.image_id.encode("utf-8"),
@@ -69,3 +69,28 @@ def publish_image_event(message: KafkaImageMessage, topic: str) -> None:
         callback=_delivery_callback,
     )
     producer.poll(0)  # Trigger delivery callbacks
+
+
+def publish_to_dlq(image_id: str, original_payload: bytes, error: str, dlq_topic: str) -> None:
+    """Publish a failed message to the dead-letter queue topic.
+
+    The DLQ message wraps the original payload together with error context so
+    that operators can inspect failures, replay events after fixing root causes,
+    or route them to an alerting pipeline.
+    """
+    producer = get_producer()
+    dlq_envelope = {
+        "image_id": image_id,
+        "error": error,
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+        "original_payload": original_payload.decode("utf-8", errors="replace"),
+    }
+    payload = json.dumps(dlq_envelope, default=_serialize).encode("utf-8")
+    producer.produce(
+        topic=dlq_topic,
+        key=image_id.encode("utf-8"),
+        value=payload,
+        callback=_delivery_callback,
+    )
+    producer.poll(0)
+    logger.warning("Published image %s to DLQ topic %s: %s", image_id, dlq_topic, error)

@@ -217,37 +217,72 @@ endpoint by replacing the `model.predict()` call with an SDK call.
 5. **MongoDB** – Write throughput cap on a single-node replica set.  Use a
    sharded cluster keyed on `image_id` (UUID → natural distribution).
 
-6. **The 25 s polling loop** – At high concurrency, many threads block polling
-   Redis.  Replace with a WebSocket or Server-Sent Events endpoint that the
-   consumer triggers once preprocessing is complete, or move to a fully async
-   callback model with a task ID returned immediately.
+6. **The upload endpoint previously had a 25 s busy-poll loop** waiting for Redis.
+   This has been removed — the upload now returns 202 immediately (see item 1
+   in the implemented improvements below).
 
-### Recommended design improvements
+### Implemented design improvements
 
-1. **Return 202 Accepted immediately** with a task ID; let the client poll
-   `GET /api/v1/images/{image_id}` for status.  This removes the polling loop
-   from the hot path entirely.
+1. ✅ **Return 202 Accepted immediately** — `POST /api/v1/upload` now responds
+   immediately with `image_id` and a `status_url`.  The Kafka consumer drives
+   the full pipeline (preprocess → Redis → ML inference → MongoDB result).
+   Clients poll `GET /api/v1/images/{image_id}` until `status == "completed"`.
 
-2. **gRPC between consumer and ML service** for lower overhead at high volume.
+2. ✅ **Separate consumer into its own Kubernetes Deployment** — see
+   `k8s/consumer-deployment.yaml`.  The consumer is also runnable standalone
+   via `python -m app.kafka.consumer_entrypoint`.
 
-3. **Separate consumer into its own Kubernetes Deployment** so it scales
-   independently of the upload API.
+3. ✅ **KEDA autoscaling for the consumer** — `k8s/keda-scaledobject.yaml`
+   defines a `ScaledObject` that watches consumer lag on `ocr.images` and
+   scales consumer pods from `minReplicaCount: 1` to `maxReplicaCount: 8`
+   (one replica per Kafka partition).  KEDA adds a replica for every 10
+   unprocessed messages and scales back down after a 60 s cooldown.
 
-4. **Use KEDA (Kubernetes Event-Driven Autoscaler)** to autoscale consumer
-   pods based on Kafka consumer lag metric.
+   Prerequisites:
+   ```bash
+   kubectl apply -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml
+   kubectl apply -f k8s/consumer-deployment.yaml
+   kubectl apply -f k8s/keda-scaledobject.yaml
+   ```
 
-5. **Dead-letter topic** for failed image processing events instead of
-   silently dropping them.
+4. ✅ **Dead-letter queue (DLQ)** — when the consumer fails to process a
+   message after exhausting retries, the original payload is forwarded to the
+   `ocr.images.dlq` Kafka topic (configurable via `KAFKA_DLQ_TOPIC`).  The
+   envelope includes `image_id`, `error`, `failed_at`, and `original_payload`
+   for operator inspection and replay.  The message is **not committed**,
+   preserving consumer-lag visibility in monitoring dashboards.
 
-6. **Idempotency guard in Kafka consumer** using Redis `SET NX` to prevent
-   double-processing if a message is re-delivered.
+5. ✅ **Idempotency guard** — the consumer calls `acquire_processing_lock()`
+   which issues a Redis `SET NX` with a 10-minute TTL before doing any work.
+   If the lock is already held (duplicate delivery or concurrent consumer),
+   the message is silently skipped.  The lock is released — and automatically
+   expires — when processing finishes, allowing clean re-processing after a
+   crash.
 
-7. **Pre-signed URL upload** – have FastAPI return a pre-signed S3/GCS URL
-   and let the client upload directly, removing the 20 MB body from the API
-   server.
+6. ✅ **Pre-signed URL upload** — `POST /api/v1/presigned-upload` returns a
+   time-limited URL (5 min) pointing directly at S3/GCS/ADLS.  The client
+   PUTs the image bytes straight to cloud storage (bypassing the API server),
+   then calls `POST /api/v1/images/{image_id}/submit` to enqueue OCR.
+   Supported backends: `s3` (presigned PUT), `gcs` (v4 signed URL),
+   `adls` (user-delegation SAS token).  Local storage returns HTTP 400
+   directing the caller to use the regular `/upload` endpoint.
 
-8. **Circuit breaker** on the ML inference HTTP call (e.g., tenacity or
-   resilience4j-style) to prevent cascade failures.
+7. ✅ **Circuit breaker on ML inference** — `app/api/inference.py` wraps the
+   HTTP call to the ML service with:
+   - **Tenacity retry**: up to 3 attempts with exponential back-off (0.5 s → 4 s)
+     on transient errors (timeouts, 5xx responses, network errors).
+   - **In-process circuit breaker**: after 5 consecutive failures the breaker
+     opens for 30 seconds.  During this window all calls raise
+     `CircuitOpenError` immediately (fail-fast), preventing thread exhaustion
+     and giving the downstream service time to recover.  The breaker
+     transitions to HALF-OPEN after the reset timeout and closes again on the
+     first successful probe.
+
+   For multi-replica deployments, store the failure counter in Redis so all
+   API pods share the same breaker state.
+
+8. **gRPC between consumer and ML service** — not yet implemented; the current
+   HTTP/JSON interface is simple and sufficient for most workloads.
 
 ---
 

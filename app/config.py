@@ -32,6 +32,7 @@ class KafkaSettings(BaseSettings):
     bootstrap_servers: str = "localhost:9092"
     image_topic: str = "ocr.images"
     consumer_group: str = "ocr-consumer-group"
+    dlq_topic: str = "ocr.images.dlq"
 
 
 class MongoSettings(BaseSettings):

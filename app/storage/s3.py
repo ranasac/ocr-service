@@ -17,9 +17,7 @@ class S3Storage(BaseStorage):
         self._client = boto3.client("s3", region_name=region)
 
     def _key(self, image_id: str, filename: str) -> str:
-        import os
-        suffix = os.path.splitext(filename)[1] or ".bin"
-        return f"images/{image_id}{suffix}"
+        return self.storage_key(image_id, filename)
 
     async def save(self, image_id: str, filename: str, data: bytes) -> str:
         import asyncio
@@ -56,3 +54,20 @@ class S3Storage(BaseStorage):
             None,
             lambda: self._client.delete_object(Bucket=self._bucket, Key=key),
         )
+
+    def generate_presigned_url(
+        self,
+        image_id: str,
+        filename: str,
+        expires_in: int = 300,
+    ) -> Optional[str]:
+        """Generate a pre-signed S3 PUT URL for direct client upload."""
+        key = self._key(image_id, filename)
+        url = self._client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self._bucket, "Key": key},
+            ExpiresIn=expires_in,
+            HttpMethod="PUT",
+        )
+        logger.info("Generated S3 pre-signed URL for %s (expires %ds)", image_id, expires_in)
+        return url

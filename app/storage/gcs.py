@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+from typing import Optional
 
 from app.storage.base import BaseStorage
 
@@ -40,3 +41,21 @@ class GCSStorage(BaseStorage):
         loop = asyncio.get_event_loop()
         blob = self._bucket.blob(blob_name)
         await loop.run_in_executor(None, blob.delete)
+
+    def generate_presigned_url(
+        self,
+        image_id: str,
+        filename: str,
+        expires_in: int = 300,
+    ) -> Optional[str]:
+        """Generate a GCS signed URL for direct client PUT upload."""
+        import datetime
+        blob_name = self._blob_name(image_id, filename)
+        blob = self._bucket.blob(blob_name)
+        url = blob.generate_signed_url(
+            expiration=datetime.timedelta(seconds=expires_in),
+            method="PUT",
+            version="v4",
+        )
+        logger.info("Generated GCS signed URL for %s (expires %ds)", image_id, expires_in)
+        return url
