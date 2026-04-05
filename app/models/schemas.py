@@ -1,7 +1,7 @@
 """Pydantic schemas for the OCR service."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -24,8 +24,8 @@ class ImageMetadata(BaseModel):
     size_bytes: int
     storage_path: str
     status: ImageStatus = ImageStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = None
 
     model_config = {"use_enum_values": True}
@@ -39,7 +39,7 @@ class KafkaImageMessage(BaseModel):
     content_type: str
     storage_path: str
     size_bytes: int
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     model_config = {"use_enum_values": True}
 

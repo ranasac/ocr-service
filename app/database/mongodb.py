@@ -1,7 +1,7 @@
 """MongoDB async client for image metadata storage."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import motor.motor_asyncio
@@ -67,7 +67,7 @@ async def update_status(
     update: dict = {
         "$set": {
             "status": status.value if hasattr(status, "value") else status,
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(timezone.utc),
         }
     }
     if error_message is not None:
