@@ -6,7 +6,7 @@ services:
   # A stable CLUSTER_ID is required; generate once with:
   #   docker run --rm confluentinc/cp-kafka:7.9.0 kafka-storage random-uuid
   kafka:
-    image: confluentinc/cp-kafka:7.9.0
+    image: confluentinc/cp-kafka:7.7.0
     ports:
       - "9092:9092"
     environment:
@@ -47,8 +47,6 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -66,7 +64,7 @@ services:
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
-      - "8888:8888"   # Prometheus metrics
+      - "9464:9464"   # Prometheus metrics exporter
 
   prometheus:
     image: prom/prometheus:v2.51.2
@@ -89,6 +87,30 @@ services:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./monitoring/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "4319:4317"   # OTLP gRPC (host-side offset to avoid conflict)
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    command:
+      - "--kafka.server=kafka:29092"
+      - "--kafka.version=2.0.0"
+    ports:
+      - "9308:9308"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ── Application Services ─────────────────────────────────────────────────────
   ml-service:
@@ -101,11 +123,12 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       LOG_LEVEL: INFO
+      OTEL_EXPORTER_ENDPOINT: http://otel-collector:4317
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -122,7 +145,7 @@ services:
       MONGODB_URI: mongodb://mongodb:27017
       REDIS_HOST: redis
       ML_SERVICE_URL: http://ml-service:8001
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_ENDPOINT: http://otel-collector:4317
       STORAGE_BACKEND: local
       STORAGE_LOCAL_PATH: /app/images
     volumes:
@@ -142,5 +165,6 @@ volumes:
   mongodb_data:
   redis_data:
   grafana_data:
+  tempo_data:
   image_data:
 

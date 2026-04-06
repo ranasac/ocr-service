@@ -26,7 +26,7 @@ from app.cache.redis_client import (
     store_image_array,
 )
 from app.config import Settings
-from app.database.mongodb import init_db, store_ocr_result, update_status
+from app.database.mongodb import store_ocr_result, update_status
 from app.image.transforms import preprocess_for_ocr
 from app.kafka.producer import publish_to_dlq
 from app.models.schemas import ImageStatus, KafkaImageMessage
@@ -120,8 +120,6 @@ def _build_consumer(settings: Settings) -> Consumer:
 
 async def run_consumer_async(settings: Settings, stop_event: Optional[asyncio.Event] = None) -> None:
     """Run the Kafka consumer loop (async wrapper)."""
-    await init_db(settings.mongodb.uri, settings.mongodb.database)
-
     consumer = _build_consumer(settings)
     consumer.subscribe([settings.kafka.image_topic])
     logger.info("Kafka consumer subscribed to %s", settings.kafka.image_topic)

@@ -26,6 +26,7 @@ import time
 from typing import Optional
 
 import httpx
+from opentelemetry import trace
 from tenacity import (
     RetryError,
     retry,
@@ -90,6 +91,7 @@ class _CircuitBreaker:
 
 
 _breaker = _CircuitBreaker(_FAILURE_THRESHOLD, _RESET_TIMEOUT_SECONDS)
+_tracer = trace.get_tracer("ocr-service.inference")
 
 
 # ── Retry decorator ────────────────────────────────────────────────────────────
@@ -152,42 +154,55 @@ async def run_ocr_inference(
     start = time.perf_counter()
     owns_client = client is None
 
-    try:
-        if owns_client:
-            client = httpx.AsyncClient(timeout=settings.timeout)
+    with _tracer.start_as_current_span("ml_inference") as span:
+        span.set_attribute("image_id", image_id)
+        span.set_attribute("ml_service.url", url)
 
-        data = await _call_ml_service(client, url, payload)
+        try:
+            if owns_client:
+                client = httpx.AsyncClient(timeout=settings.timeout)
 
-        elapsed = time.perf_counter() - start
-        ml_inference_latency_seconds.observe(elapsed)
-        _breaker.record_success()
+            data = await _call_ml_service(client, url, payload)
 
-        return OCRResult(
-            image_id=image_id,
-            text=data.get("text", ""),
-            confidence=data.get("confidence"),
-            processing_time_ms=elapsed * 1000,
-            words=data.get("words"),
-        )
+            elapsed = time.perf_counter() - start
+            ml_inference_latency_seconds.observe(elapsed)
+            _breaker.record_success()
 
-    except httpx.TimeoutException as exc:
-        _breaker.record_failure()
-        ml_inference_errors_total.labels(error_type="timeout").inc()
-        logger.error("ML inference timeout for image %s: %s", image_id, exc)
-        raise
+            span.set_attribute("ml_service.confidence", data.get("confidence") or 0.0)
+            span.set_attribute("ml_service.text_length", len(data.get("text", "")))
 
-    except httpx.HTTPStatusError as exc:
-        _breaker.record_failure()
-        ml_inference_errors_total.labels(error_type="http_error").inc()
-        logger.error("ML inference HTTP error for image %s: %s", image_id, exc)
-        raise
+            return OCRResult(
+                image_id=image_id,
+                text=data.get("text", ""),
+                confidence=data.get("confidence"),
+                processing_time_ms=elapsed * 1000,
+                words=data.get("words"),
+            )
 
-    except Exception as exc:
-        _breaker.record_failure()
-        ml_inference_errors_total.labels(error_type="unknown").inc()
-        logger.exception("ML inference unexpected error for image %s: %s", image_id, exc)
-        raise
+        except httpx.TimeoutException as exc:
+            _breaker.record_failure()
+            ml_inference_errors_total.labels(error_type="timeout").inc()
+            span.record_exception(exc)
+            span.set_status(trace.StatusCode.ERROR, "ML inference timeout")
+            logger.error("ML inference timeout for image %s: %s", image_id, exc)
+            raise
 
-    finally:
-        if owns_client and client:
-            await client.aclose()
+        except httpx.HTTPStatusError as exc:
+            _breaker.record_failure()
+            ml_inference_errors_total.labels(error_type="http_error").inc()
+            span.record_exception(exc)
+            span.set_status(trace.StatusCode.ERROR, f"HTTP {exc.response.status_code}")
+            logger.error("ML inference HTTP error for image %s: %s", image_id, exc)
+            raise
+
+        except Exception as exc:
+            _breaker.record_failure()
+            ml_inference_errors_total.labels(error_type="unknown").inc()
+            span.record_exception(exc)
+            span.set_status(trace.StatusCode.ERROR, str(exc))
+            logger.exception("ML inference unexpected error for image %s: %s", image_id, exc)
+            raise
+
+        finally:
+            if owns_client and client:
+                await client.aclose()

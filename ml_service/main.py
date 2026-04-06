@@ -19,6 +19,12 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from pydantic import BaseModel
 
 # Allow running as a standalone module
@@ -35,6 +41,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Tracing setup ─────────────────────────────────────────────────────────────
+_otel_endpoint = os.getenv("OTEL_EXPORTER_ENDPOINT", "http://localhost:4317")
+_resource = Resource.create({SERVICE_NAME: "ml-service"})
+_provider = TracerProvider(resource=_resource)
+_provider.add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=_otel_endpoint, insecure=True))
+)
+trace.set_tracer_provider(_provider)
+_tracer = trace.get_tracer("ml-service.inference")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,12 +66,17 @@ async def lifespan(app: FastAPI):
     yield
 
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
 app = FastAPI(
     title="OCR ML Inference Service",
     description="Lightweight Tesseract-based OCR inference microservice",
     version="1.0.0",
     lifespan=lifespan,
 )
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+FastAPIInstrumentor.instrument_app(app)
 
 
 class InferRequest(BaseModel):
@@ -77,23 +98,32 @@ async def infer(request: InferRequest) -> InferResponse:
     image_id = request.image_id
     logger.info("Inference request for image_id=%s", image_id)
 
-    array = await load_image_array(image_id)
-    if array is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No preprocessed array found for image_id={image_id!r}",
+    with _tracer.start_as_current_span("ocr_model_predict") as span:
+        span.set_attribute("image_id", image_id)
+
+        array = await load_image_array(image_id)
+        if array is None:
+            span.set_status(trace.StatusCode.ERROR, "array not found in Redis")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No preprocessed array found for image_id={image_id!r}",
+            )
+
+        span.set_attribute("image.shape", str(array.shape))
+
+        model = get_model()
+        result = model.predict(array)
+
+        span.set_attribute("ocr.text_length", len(result.get("text", "")))
+        span.set_attribute("ocr.confidence", result.get("confidence") or 0.0)
+
+        return InferResponse(
+            image_id=image_id,
+            text=result["text"],
+            confidence=result.get("confidence"),
+            words=result.get("words"),
+            processing_time_ms=result["processing_time_ms"],
         )
-
-    model = get_model()
-    result = model.predict(array)
-
-    return InferResponse(
-        image_id=image_id,
-        text=result["text"],
-        confidence=result.get("confidence"),
-        words=result.get("words"),
-        processing_time_ms=result["processing_time_ms"],
-    )
 
 
 @app.get("/health")

@@ -14,7 +14,7 @@
         {
           "expr": "rate(ocr_requests_total[1m])",
           "legendFormat": "{{status}}",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         }
       ]
     },
@@ -27,17 +27,17 @@
         {
           "expr": "histogram_quantile(0.50, rate(ocr_latency_seconds_bucket[5m]))",
           "legendFormat": "p50",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         },
         {
           "expr": "histogram_quantile(0.95, rate(ocr_latency_seconds_bucket[5m]))",
           "legendFormat": "p95",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         },
         {
           "expr": "histogram_quantile(0.99, rate(ocr_latency_seconds_bucket[5m]))",
           "legendFormat": "p99",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         }
       ]
     },
@@ -50,7 +50,7 @@
         {
           "expr": "rate(ocr_requests_total{status=\"error\"}[5m])",
           "legendFormat": "errors/s",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         }
       ]
     },
@@ -63,7 +63,7 @@
         {
           "expr": "rate(kafka_messages_consumed_total[1m])",
           "legendFormat": "{{status}}",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         }
       ]
     },
@@ -76,7 +76,7 @@
         {
           "expr": "histogram_quantile(0.95, rate(ml_inference_latency_seconds_bucket[5m]))",
           "legendFormat": "p95",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         }
       ]
     },
@@ -89,7 +89,122 @@
         {
           "expr": "histogram_quantile(0.95, rate(image_transform_latency_seconds_bucket[5m]))",
           "legendFormat": "p95",
-          "datasource": "Prometheus"
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Kafka Consumer Group — Total Lag",
+      "description": "Total number of messages the consumer is behind across all partitions. A rising value means the consumer cannot keep up with the producer.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "kafka_consumergroup_lag_sum{consumergroup=\"ocr-consumer-group\"}",
+          "legendFormat": "{{topic}}",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Kafka Consumer Lag — Growth Rate",
+      "description": "Rate of change of consumer lag over 5 min. Positive = falling behind, negative = catching up, zero = stable.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "rate(kafka_consumergroup_lag_sum{consumergroup=\"ocr-consumer-group\"}[5m])",
+          "legendFormat": "lag rate — {{topic}}",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Consumer Active Members",
+      "description": "Number of active instances in the OCR consumer group. 0 means the consumer is down and no messages are being processed.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 32 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } }
+          ]
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "expr": "kafka_consumergroup_members{consumergroup=\"ocr-consumer-group\"}",
+          "legendFormat": "members",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Kafka Lag per Partition",
+      "description": "Per-partition lag breakdown. Useful for identifying a single stuck partition.",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 18, "x": 6, "y": 32 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 5 }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "kafka_consumergroup_lag{consumergroup=\"ocr-consumer-group\"}",
+          "legendFormat": "{{topic}} — p{{partition}}",
+          "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}
         }
       ]
     }

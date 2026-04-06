@@ -69,16 +69,16 @@ Response:
 
 ```bash
 # Install dependencies
-pip install -r requirements-dev.txt
+uv sync --all-extras
 
 # Start infrastructure (Kafka, MongoDB, Redis)
-docker-compose up zookeeper kafka mongodb redis -d
+docker-compose up kafka mongodb redis -d
 
 # Start ML service
-uvicorn ml_service.main:app --port 8001 --reload
+uv run uvicorn ml_service.main:app --port 8001 --reload
 
 # Start OCR service
-APP_ENV=local uvicorn app.main:app --port 8000 --reload
+APP_ENV=local uv run uvicorn app.main:app --port 8000 --reload
 ```
 
 ---
@@ -86,8 +86,8 @@ APP_ENV=local uvicorn app.main:app --port 8000 --reload
 ## Running Tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest tests/ -v
+uv sync --all-extras
+uv run pytest tests/ -v
 ```
 
 ---
