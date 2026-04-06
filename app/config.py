@@ -35,6 +35,14 @@ class KafkaSettings(BaseSettings):
     dlq_topic: str = "ocr.images.dlq"
 
 
+class SchemaRegistrySettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SCHEMA_REGISTRY_", extra="ignore")
+
+    url: str = "http://localhost:8081"
+    # Optional basic-auth for hosted registries (Confluent Cloud, etc.)
+    basic_auth_user_info: Optional[str] = None  # "key:secret"
+
+
 class MongoSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MONGODB_", extra="ignore")
 
@@ -108,6 +116,7 @@ class Settings(BaseSettings):
 
     # Sub-settings (can be overridden via env vars with prefix)
     kafka: KafkaSettings = KafkaSettings()
+    schema_registry: SchemaRegistrySettings = SchemaRegistrySettings()
     mongodb: MongoSettings = MongoSettings()
     redis: RedisSettings = RedisSettings()
     storage: StorageSettings = StorageSettings()
@@ -145,6 +154,7 @@ class Settings(BaseSettings):
                             pass
 
         _merge(self.kafka, "kafka")
+        _merge(self.schema_registry, "schema_registry")
         _merge(self.mongodb, "mongodb")
         _merge(self.redis, "redis")
         _merge(self.storage, "storage")

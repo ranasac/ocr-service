@@ -12,12 +12,12 @@ Responsibilities:
 """
 
 import asyncio
-import json
 import logging
 import threading
 from typing import Optional
 
-from confluent_kafka import Consumer, KafkaError, Message
+from confluent_kafka import DeserializingConsumer, KafkaError, Message
+from confluent_kafka.serialization import StringDeserializer
 
 from app.api.inference import CircuitOpenError, run_ocr_inference
 from app.cache.redis_client import (
@@ -29,6 +29,7 @@ from app.config import Settings
 from app.database.mongodb import store_ocr_result, update_status
 from app.image.transforms import preprocess_for_ocr
 from app.kafka.producer import publish_to_dlq
+from app.kafka.serializers import get_deserializer
 from app.models.schemas import ImageStatus, KafkaImageMessage
 from app.observability.metrics import (
     image_transform_latency_seconds,
@@ -39,19 +40,27 @@ from app.storage import get_storage
 logger = logging.getLogger(__name__)
 
 
-async def process_message(msg_value: bytes, settings: Settings) -> None:
-    """Process a single Kafka message end-to-end."""
-    data = json.loads(msg_value)
-    event = KafkaImageMessage(**data)
+def _proto_to_pydantic(proto_msg) -> KafkaImageMessage:
+    """Convert a deserialized protobuf KafkaImageMessage to the Pydantic model."""
+    return KafkaImageMessage(
+        image_id=proto_msg.image_id,
+        filename=proto_msg.filename,
+        content_type=proto_msg.content_type,
+        storage_path=proto_msg.storage_path,
+        size_bytes=proto_msg.size_bytes,
+        # timestamp is an ISO string in the proto; Pydantic parses it automatically
+        timestamp=proto_msg.timestamp or None,
+    )
+
+
+async def process_message(proto_msg, settings: Settings) -> None:
+    """Process a single deserialized Kafka message end-to-end."""
+    event = _proto_to_pydantic(proto_msg)
     image_id = event.image_id
 
     logger.info("Processing image %s (%s)", image_id, event.filename)
 
     # ── Idempotency guard ─────────────────────────────────────────────────────
-    # Acquire a Redis lock before doing any work. If the lock is already held
-    # (because this message was re-delivered after a crash or due to a Kafka
-    # at-least-once delivery guarantee), skip processing entirely to avoid
-    # running the expensive pipeline twice.
     lock_acquired = await acquire_processing_lock(image_id)
     if not lock_acquired:
         logger.warning(
@@ -87,11 +96,19 @@ async def process_message(msg_value: bytes, settings: Settings) -> None:
     except Exception as exc:
         logger.exception("Failed to process image %s: %s", image_id, exc)
         await update_status(image_id, ImageStatus.FAILED, error_message=str(exc))
-        # Publish to dead-letter queue so the event is not silently lost
         try:
+            # Re-serialize to bytes for the DLQ envelope using proto
+            from proto.ocr_image_pb2 import KafkaImageMessage as KafkaImageMessageProto  # type: ignore[import]  # noqa: PLC0415
+            original_bytes = KafkaImageMessageProto(
+                image_id=event.image_id,
+                filename=event.filename,
+                content_type=event.content_type,
+                storage_path=event.storage_path,
+                size_bytes=event.size_bytes,
+            ).SerializeToString()
             publish_to_dlq(
                 image_id=image_id,
-                original_payload=msg_value,
+                original_payload=original_bytes,
                 error=str(exc),
                 dlq_topic=settings.kafka.dlq_topic,
             )
@@ -100,13 +117,10 @@ async def process_message(msg_value: bytes, settings: Settings) -> None:
         raise
 
     finally:
-        # Always release the lock so re-processing is possible if the lock
-        # expired before completion (TTL safety net already handles this, but
-        # explicit release keeps the key space tidy).
         await release_processing_lock(image_id)
 
 
-def _build_consumer(settings: Settings) -> Consumer:
+def _build_consumer(settings: Settings) -> DeserializingConsumer:
     conf = {
         "bootstrap.servers": settings.kafka.bootstrap_servers,
         "group.id": settings.kafka.consumer_group,
@@ -114,15 +128,18 @@ def _build_consumer(settings: Settings) -> Consumer:
         "enable.auto.commit": False,
         "session.timeout.ms": 30000,
         "max.poll.interval.ms": 300000,
+        # Deserializers: key → UTF-8 string, value → Protobuf via Schema Registry
+        "key.deserializer": StringDeserializer("utf_8"),
+        "value.deserializer": get_deserializer(),
     }
-    return Consumer(conf)
+    return DeserializingConsumer(conf)
 
 
 async def run_consumer_async(settings: Settings, stop_event: Optional[asyncio.Event] = None) -> None:
     """Run the Kafka consumer loop (async wrapper)."""
     consumer = _build_consumer(settings)
     consumer.subscribe([settings.kafka.image_topic])
-    logger.info("Kafka consumer subscribed to %s", settings.kafka.image_topic)
+    logger.info("Kafka DeserializingConsumer subscribed to %s", settings.kafka.image_topic)
 
     stop_event = stop_event or asyncio.Event()
     loop = asyncio.get_event_loop()
@@ -147,13 +164,12 @@ async def run_consumer_async(settings: Settings, stop_event: Optional[asyncio.Ev
                 continue
 
             try:
+                # msg.value() is already the deserialized protobuf object
                 await process_message(msg.value(), settings)
                 consumer.commit(message=msg)
                 kafka_messages_consumed_total.labels(topic=topic, status="success").inc()
             except Exception:
                 kafka_messages_consumed_total.labels(topic=topic, status="error").inc()
-                # Don't commit – message already sent to DLQ; committing here
-                # would hide the failure from lag metrics.
 
     finally:
         consumer.close()

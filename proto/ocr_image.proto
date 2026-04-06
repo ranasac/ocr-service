@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ocr;
+
+// DO NOT change field numbers — Protobuf uses numbers (not names) on the wire.
+// Adding new fields is safe. Removing or renumbering is a breaking change.
+// The Schema Registry enforces BACKWARD compatibility by default:
+//   - New fields MUST have defaults (proto3 fields always have zero-value defaults)
+//   - Removing a field without reserving its number is rejected by the registry
+message KafkaImageMessage {
+  string image_id      = 1;
+  string filename      = 2;
+  string content_type  = 3;
+  string storage_path  = 4;
+  int64  size_bytes    = 5;
+  string timestamp     = 6;  // ISO 8601 UTC string
+}

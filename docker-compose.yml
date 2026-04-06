@@ -112,6 +112,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.7.0
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "kafka:29092"
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      # Enforce BACKWARD compatibility by default: new schemas must be able to
+      # read data written by the previous schema version.
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   # ── Application Services ─────────────────────────────────────────────────────
   ml-service:
     build:
@@ -142,6 +162,7 @@ services:
     environment:
       APP_ENV: local
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
       MONGODB_URI: mongodb://mongodb:27017
       REDIS_HOST: redis
       ML_SERVICE_URL: http://ml-service:8001
@@ -158,6 +179,8 @@ services:
       redis:
         condition: service_healthy
       ml-service:
+        condition: service_healthy
+      schema-registry:
         condition: service_healthy
 
 volumes:

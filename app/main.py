@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.database.mongodb import close_db, init_db
 from app.kafka.consumer import run_consumer_async
 from app.kafka.producer import close_producer, init_producer
+from app.kafka.serializers import init_serializers
 from app.observability.tracing import setup_tracing
 from app.api.routes import router
 from app.api.ui_routes import ui_router
@@ -46,6 +47,9 @@ async def lifespan(app: FastAPI):
 
     # Redis
     await init_redis(settings.redis)
+
+    # Schema Registry serializers (must be before init_producer)
+    init_serializers(settings.schema_registry)
 
     # Kafka producer
     init_producer(settings.kafka)

@@ -1,4 +1,13 @@
-.PHONY: up down restart logs test test-cov lint infra dev-api dev-ml
+.PHONY: up down restart logs test test-cov lint infra dev-api dev-ml proto
+
+# ── Protobuf ──────────────────────────────────────────────────────────────────
+
+proto:
+	python -m grpc_tools.protoc \
+	    -I./proto \
+	    --python_out=./proto \
+	    proto/ocr_image.proto
+	@echo "Generated proto/ocr_image_pb2.py"
 
 # ── Docker Compose ────────────────────────────────────────────────────────────
 
