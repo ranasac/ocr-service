@@ -1,0 +1,21 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# Never commit terraform.tfvars to version control (it contains secrets).
+
+aws_region   = "us-east-1"
+environment  = "dev"
+cluster_name = "ocr-service-cluster"
+
+# Node sizing — start small for dev, scale up for prod
+general_node_instance_types = ["t3.medium"]
+general_node_min            = 2
+general_node_max            = 10
+general_node_desired        = 2
+
+ml_node_instance_types = ["c5.xlarge"]
+ml_node_min            = 1
+ml_node_max            = 10
+ml_node_desired        = 1
+
+# Secrets — replace with strong values before applying
+mongodb_root_password = "CHANGE_ME_strong_password"
+redis_password        = ""   # leave empty to disable Redis AUTH
